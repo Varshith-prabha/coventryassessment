@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 const healthRouter = require('./routes/health');
 const authRouter = require('./routes/auth');
+const workoutsRouter = require('./routes/workouts');
 
 dotenv.config();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 
 app.use('/api', healthRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/workouts', workoutsRouter);
 
 app.get('/', (_req, res) => {
   res.json({ message: 'Gym beginner API is running' });

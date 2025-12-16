@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
+const API_URL = 'http://localhost:5000/api/workouts';
+
 function WorkoutSession() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -11,6 +13,8 @@ function WorkoutSession() {
   const [isWorkoutComplete, setIsWorkoutComplete] = useState(false);
   const [timer, setTimer] = useState(0);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const [workoutLogId, setWorkoutLogId] = useState(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!workoutPlan) {
@@ -30,19 +34,150 @@ function WorkoutSession() {
     return () => clearInterval(interval);
   }, [isTimerRunning, timer]);
 
+  // Update workout duration every 10 seconds
+  useEffect(() => {
+    if (isTimerRunning && workoutLogId && timer > 0 && timer % 10 === 0) {
+      updateWorkoutDuration();
+    }
+  }, [timer, workoutLogId, isTimerRunning]);
+
+  const getAuthToken = () => {
+    return localStorage.getItem('token');
+  };
+
+  const startWorkoutSession = async () => {
+    try {
+      setLoading(true);
+      const token = getAuthToken();
+      if (!token) {
+        navigate('/login');
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ workoutPlan }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setWorkoutLogId(data.workoutLogId);
+        setIsTimerRunning(true);
+      } else {
+        console.error('Failed to start workout session:', data.message);
+        alert('Failed to start workout session. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error starting workout session:', error);
+      alert('Network error. Please check your connection.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const updateExerciseCompletion = async (exerciseIndex, completed) => {
+    if (!workoutLogId) return;
+
+    try {
+      const token = getAuthToken();
+      const response = await fetch(`${API_URL}/exercise/${workoutLogId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          exerciseIndex,
+          completed,
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        console.error('Failed to update exercise:', data.message);
+      }
+    } catch (error) {
+      console.error('Error updating exercise:', error);
+    }
+  };
+
+  const updateWorkoutDuration = async () => {
+    if (!workoutLogId) return;
+
+    try {
+      const token = getAuthToken();
+      await fetch(`${API_URL}/duration/${workoutLogId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          duration: timer,
+        }),
+      });
+    } catch (error) {
+      console.error('Error updating workout duration:', error);
+    }
+  };
+
+  const completeWorkout = async () => {
+    if (!workoutLogId) {
+      navigate('/dashboard');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const token = getAuthToken();
+      const response = await fetch(`${API_URL}/complete/${workoutLogId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          duration: timer,
+        }),
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        navigate('/dashboard');
+      } else {
+        console.error('Failed to complete workout:', data.message);
+        // Still navigate to dashboard even if save fails
+        navigate('/dashboard');
+      }
+    } catch (error) {
+      console.error('Error completing workout:', error);
+      // Still navigate to dashboard even if save fails
+      navigate('/dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleStartWorkout = () => {
-    setIsTimerRunning(true);
+  const handleStartWorkout = async () => {
+    await startWorkoutSession();
   };
 
-  const handleCompleteExercise = (exerciseIndex) => {
+  const handleCompleteExercise = async (exerciseIndex) => {
     if (!completedExercises.includes(exerciseIndex)) {
       setCompletedExercises([...completedExercises, exerciseIndex]);
+      // Save exercise completion to backend
+      await updateExerciseCompletion(exerciseIndex, true);
     }
     
     // Move to next exercise
@@ -52,6 +187,8 @@ function WorkoutSession() {
       // All exercises completed
       setIsWorkoutComplete(true);
       setIsTimerRunning(false);
+      // Update final duration
+      await updateWorkoutDuration();
     }
   };
 
@@ -61,9 +198,8 @@ function WorkoutSession() {
     }
   };
 
-  const handleFinishWorkout = () => {
-    // TODO: Save workout data to backend
-    navigate('/dashboard');
+  const handleFinishWorkout = async () => {
+    await completeWorkout();
   };
 
   if (!workoutPlan) {
@@ -122,9 +258,12 @@ function WorkoutSession() {
             {!isTimerRunning && completedExercises.length === 0 && (
               <button
                 onClick={handleStartWorkout}
-                className="px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold rounded-xl hover:shadow-lg transition-all"
+                disabled={loading}
+                className={`px-6 py-2 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-bold rounded-xl hover:shadow-lg transition-all ${
+                  loading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
-                Start Workout
+                {loading ? 'Starting...' : 'Start Workout'}
               </button>
             )}
           </div>
@@ -144,9 +283,12 @@ function WorkoutSession() {
             </div>
             <button
               onClick={handleFinishWorkout}
-              className="px-8 py-3 bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 text-white font-bold rounded-xl hover:shadow-2xl transition-all transform hover:scale-105"
+              disabled={loading}
+              className={`px-8 py-3 bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 text-white font-bold rounded-xl hover:shadow-2xl transition-all transform hover:scale-105 ${
+                loading ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
             >
-              Finish & Return to Dashboard
+              {loading ? 'Saving...' : 'Finish & Return to Dashboard'}
             </button>
           </div>
         ) : (
